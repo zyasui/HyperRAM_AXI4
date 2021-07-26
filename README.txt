@@ -72,3 +72,104 @@ parameter of this IP to match the same byte length as the cache line length.
 
  * This IP supports INCR and WRAP AXI4 burst access types, but FIXED burst
    type is not supported.
+
+
+
+<Calibration>
+This IP requires a delay tap calibration process for DQ[7:0] and RWDS lines
+before using. An example calibration code is shown below.
+
+------
+#include <stdint.h>
+#include <stdbool.h>
+#include <xil_cache.h>
+
+static uint32_t lfsr32(void);
+static uint32_t lfsr_var = 0x12345678;
+
+/*
+ * Argument:
+ *   reg_base: HyperRAM_AXI4 IP AXI4-Lite register space base address.
+ *   mem_base: HyperRAM_AXI4 IP AXI4 memory space base address. This function uses the first 8192 bytes of memory space for testing.
+ *
+ * Return:
+ *   true:  Calibration failed.
+ *   false: Calibration succeeded.
+ */
+bool HyperRAM_DelayCalibration(uint32_t reg_base, uint32_t mem_base)
+{
+	uint32_t pass_fail_map;	// 0:pass 1:fail
+	uint32_t rand_val;
+	int tap, i, start;
+
+	Xil_DCacheDisable();
+
+	// Reset delay tap value
+	*(volatile uint32_t *)reg_base = 0x2;
+
+	// Create the Pass/Fail map
+	pass_fail_map = 0;
+	for(tap=0; tap!=32; tap++) {
+		for(i=0; i!=1024; i++) {
+			rand_val = lfsr32();
+			*(volatile uint32_t *)(mem_base + i * 4)        = rand_val;
+			*(volatile uint32_t *)(mem_base + i * 4 + 4096) = rand_val;
+		}
+		for(i=0; i!=1024; i++) {
+			if(*(volatile uint32_t *)(mem_base + i * 4) != *(volatile uint32_t *)(mem_base + i * 4 + 4096))
+				break;
+		}
+		if(i != 1024)
+			pass_fail_map |= 1ul << tap;	// mark as "fail"
+
+		// Increment delay tap value
+		*(volatile uint32_t *)reg_base = 0x1;
+	}
+
+	// Check the Pass/Fail map
+	start = 0;
+	for(tap=0; tap!=32; tap++) {
+		if(pass_fail_map & (1ul << tap)) {
+			// Failed tap position found
+			if((tap - start) >= 8)
+				// There is a wide "safety island"
+				break;
+			else
+				start = tap;	// check again
+		}
+	}
+	if((tap == 32) && ((tap - start) < 8))
+		// We couldn't find an optimal tap position.
+		return true;
+
+	// Reset delay tap value
+	*(volatile uint32_t *)reg_base = 0x2;
+	for(i=0; i!=(tap + start)>>1; i++)
+		// Increment the delay tap value to the middle of "safety island"
+		*(volatile uint32_t *)reg_base = 0x1;
+
+	// Final check
+	for(i=0; i!=1024; i++) {
+		rand_val = lfsr32();
+		*(volatile uint32_t *)(mem_base + i * 4)        = rand_val;
+		*(volatile uint32_t *)(mem_base + i * 4 + 4096) = rand_val;
+	}
+	for(i=0; i!=1024; i++) {
+		if(*(volatile uint32_t *)(mem_base + i * 4) != *(volatile uint32_t *)(mem_base + i * 4 + 4096))
+			break;
+	}
+	if(i != 1024)
+		return true;	// data error
+
+	Xil_DCacheEnable();
+
+	return false;
+}
+
+static uint32_t lfsr32(void)
+{
+	lfsr_var = (lfsr_var & 1) ? (lfsr_var >> 1) ^ 0xa3000000 : (lfsr_var >> 1);
+
+	return lfsr_var;
+}
+------

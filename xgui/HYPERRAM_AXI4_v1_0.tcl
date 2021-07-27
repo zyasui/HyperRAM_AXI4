@@ -7,7 +7,10 @@ proc init_gui { IPINST } {
   ipgui::add_param $IPINST -name "LATENCY" -parent ${Page_0} -widget comboBox
   ipgui::add_param $IPINST -name "POWERUP_WAIT_COUNT" -parent ${Page_0}
   ipgui::add_param $IPINST -name "WRAP_BURST_LEN" -parent ${Page_0} -widget comboBox
-
+  set SAME_CLOCK_MODE [ipgui::add_param $IPINST -name "SAME_CLOCK_MODE" -parent ${Page_0} -widget comboBox]
+  set_property tooltip {Same Clock Mode (If AXI_ACLK and IOCLK_0 are exact same clock, this option can be enabled and clock translation logic will be reduced)} ${SAME_CLOCK_MODE}
+  ipgui::add_param $IPINST -name "AWID_WIDTH" -parent ${Page_0}
+  ipgui::add_param $IPINST -name "ARID_WIDTH" -parent ${Page_0}
 
 }
 
@@ -56,6 +59,15 @@ proc validate_PARAM_VALUE.POWERUP_WAIT_COUNT { PARAM_VALUE.POWERUP_WAIT_COUNT } 
 	return true
 }
 
+proc update_PARAM_VALUE.SAME_CLOCK_MODE { PARAM_VALUE.SAME_CLOCK_MODE } {
+	# Procedure called to update SAME_CLOCK_MODE when any of the dependent parameters in the arguments change
+}
+
+proc validate_PARAM_VALUE.SAME_CLOCK_MODE { PARAM_VALUE.SAME_CLOCK_MODE } {
+	# Procedure called to validate SAME_CLOCK_MODE
+	return true
+}
+
 proc update_PARAM_VALUE.WRAP_BURST_LEN { PARAM_VALUE.WRAP_BURST_LEN } {
 	# Procedure called to update WRAP_BURST_LEN when any of the dependent parameters in the arguments change
 }
@@ -94,5 +106,10 @@ proc update_MODELPARAM_VALUE.AWID_WIDTH { MODELPARAM_VALUE.AWID_WIDTH PARAM_VALU
 proc update_MODELPARAM_VALUE.ARID_WIDTH { MODELPARAM_VALUE.ARID_WIDTH PARAM_VALUE.ARID_WIDTH } {
 	# Procedure called to set VHDL generic/Verilog parameter value(s) based on TCL parameter value
 	set_property value [get_property value ${PARAM_VALUE.ARID_WIDTH}] ${MODELPARAM_VALUE.ARID_WIDTH}
+}
+
+proc update_MODELPARAM_VALUE.SAME_CLOCK_MODE { MODELPARAM_VALUE.SAME_CLOCK_MODE PARAM_VALUE.SAME_CLOCK_MODE } {
+	# Procedure called to set VHDL generic/Verilog parameter value(s) based on TCL parameter value
+	set_property value [get_property value ${PARAM_VALUE.SAME_CLOCK_MODE}] ${MODELPARAM_VALUE.SAME_CLOCK_MODE}
 }
 

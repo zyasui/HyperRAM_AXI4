@@ -36,19 +36,19 @@
 
 module HYPERRAM_AXI4 #(
 	parameter POWERUP_WAIT_COUNT = 24999,	// decide this value to ensure the power-up wait time (tVCS, unit:1/IOCLK_0)
-//	parameter SAME_CLOCK_MODE = 0,			// enable this mode if IOCLK_0 == AXI_ACLK (Not implemented yet, this mode will make it possible to remove all the FIFOs in this IP.)
+	parameter SAME_CLOCK_MODE = 0,			// enable this mode if IOCLK_0 == AXI_ACLK (This mode makes it possible to reduce clock translation latency.)
 	parameter LATENCY = 6,
 	parameter FIXED_LATENCY_MODE = 0,
 	parameter WRAP_BURST_LEN = 16,			// WRAP_BURST_LEN must be same to your system's cache line length in bytes. 16, 32, 64, 128 bytes are supported.
-	parameter AWID_WIDTH = 2,
-	parameter ARID_WIDTH = 2
+	parameter AWID_WIDTH = 8,
+	parameter ARID_WIDTH = 8
 ) (
 	// Clock and reset
 	input wire REFCLK200M,		// 200MHz IDELAYCTRL reference clock
 	input wire IOCLK_0,			// Fundamental clock
 	input wire IOCLK_90,		// 90deg rag clock against IOCLK_0
 	input wire AXI_ACLK,
-	input wire AXI_ARESETN,		// Synchronous reset ()
+	input wire AXI_ARESETN,		// Synchronous reset (Low active)
 
 	// AXI4 Slave (Memory Space)
 	input wire[AWID_WIDTH-1:0] Sm_AXI_AWID,
@@ -174,11 +174,25 @@ module HYPERRAM_AXI4 #(
 	reg[AWID_WIDTH-1:0] awid;
 
 	FIFO_READ_WRITE_ADDR fifo0(
-		.rst(~AXI_ARESETN),
-		.wr_clk(AXI_ACLK), .din({ Sm_AXI_AWBURST, Sm_AXI_AWADDR, Sm_AXI_AWLEN }), .wr_en(fifo0_wr_en), .wr_rst_busy(fifo0_wr_rst_busy),
-		.rd_clk(IOCLK_0), .dout(fifo0_dout), .rd_en(fifo0_rd_en), .empty(fifo0_empty) );
+		.rst(~AXI_ARESETN | SAME_CLOCK_MODE),
+		.wr_clk(AXI_ACLK & ~SAME_CLOCK_MODE), .din({ Sm_AXI_AWBURST, Sm_AXI_AWADDR, Sm_AXI_AWLEN }), .wr_en(fifo0_wr_en), .wr_rst_busy(fifo0_wr_rst_busy),
+		.rd_clk(IOCLK_0  & ~SAME_CLOCK_MODE), .dout(fifo0_dout), .rd_en(fifo0_rd_en), .empty(fifo0_empty) );
 
-	assign Sm_AXI_AWREADY = (fifo0_wr_rst_busy || write_channel_pending) ? 1'b0 : 1'b1;
+	// fifo0 emulation for SAME_CLOCK_MODE
+	reg[41:0] fifo0s_data;
+	reg fifo0s_empty;
+
+	always @(posedge AXI_ACLK) begin
+		if(!AXI_ARESETN)
+			fifo0s_empty <= 1'b1;
+		else if(fifo0_wr_en) begin
+			fifo0s_data <= { Sm_AXI_AWBURST, Sm_AXI_AWADDR, Sm_AXI_AWLEN };
+			fifo0s_empty <= 1'b0;
+		end else if(fifo0_rd_en)
+			fifo0s_empty <= 1'b1;
+	end
+
+	assign Sm_AXI_AWREADY = ((SAME_CLOCK_MODE ? 1'b0 : fifo0_wr_rst_busy) || write_channel_pending) ? 1'b0 : 1'b1;
 	assign awerror = ( Sm_AXI_AWVALID && ((Sm_AXI_AWSIZE != AxSIZE_32BIT) || ((Sm_AXI_AWLEN != 8'd00) && (Sm_AXI_AWBURST != AxBURST_INCR) && (Sm_AXI_AWBURST != AxBURST_WRAP))) ) ? 1'b1 : 1'b0;	// Only 32-bit, INCR or WRAP burst access is supported
 	assign fifo0_wr_en = (Sm_AXI_AWVALID && Sm_AXI_AWREADY && !awerror) ? 1'b1 : 1'b0;
 
@@ -186,16 +200,21 @@ module HYPERRAM_AXI4 #(
 		if(Sm_AXI_AWVALID && Sm_AXI_AWREADY)
 			awid <= Sm_AXI_AWID;
 
-	wire fifo1_wr_en, fifo1_rd_en, fifo1_empty, fifo1_full, fifo1_wr_rst_busy;
-	wire[9:0] fifo1_rd_data_count;
-	wire[17:0] fifo1_dout;
+	wire fifo1_wr_en, fifo1_rd_en, fifo1_full, fifo1_wr_rst_busy, fifo1s_full;
+	wire[9:0] fifo1_rd_data_count, fifo1s_rd_data_count;
+	wire[17:0] fifo1_dout, fifo1s_dout;
 
 	FIFO_WRITE_DATA fifo1(
-		.rst(~AXI_ARESETN),
-		.wr_clk(AXI_ACLK), .din({ Sm_AXI_WSTRB[1:0], Sm_AXI_WDATA[15:0], Sm_AXI_WSTRB[3:2], Sm_AXI_WDATA[31:16] }), .wr_en(fifo1_wr_en), .full(fifo1_full), .wr_rst_busy(fifo1_wr_rst_busy),
-		.rd_clk(IOCLK_0), .dout(fifo1_dout), .rd_en(fifo1_rd_en), .empty(fifo1_empty), .rd_data_count(fifo1_rd_data_count) );
+		.rst(~AXI_ARESETN | SAME_CLOCK_MODE),
+		.wr_clk(AXI_ACLK & ~SAME_CLOCK_MODE), .din({ Sm_AXI_WSTRB[1:0], Sm_AXI_WDATA[15:0], Sm_AXI_WSTRB[3:2], Sm_AXI_WDATA[31:16] }), .wr_en(fifo1_wr_en), .full(fifo1_full), .wr_rst_busy(fifo1_wr_rst_busy),
+		.rd_clk(IOCLK_0  & ~SAME_CLOCK_MODE), .dout(fifo1_dout), .rd_en(fifo1_rd_en), .rd_data_count(fifo1_rd_data_count) );
 
-	assign Sm_AXI_WREADY = (fifo1_wr_rst_busy || fifo1_full) ? 1'b0 : 1'b1;
+	FIFO_WRITE_DATA_SYNC fifo1s(	// Sync'd common clock version of FIFO
+		.srst(~AXI_ARESETN | ~SAME_CLOCK_MODE), .clk(AXI_ACLK & SAME_CLOCK_MODE),
+		.din({ Sm_AXI_WSTRB[1:0], Sm_AXI_WDATA[15:0], Sm_AXI_WSTRB[3:2], Sm_AXI_WDATA[31:16] }), .wr_en(fifo1_wr_en), .full(fifo1s_full),
+		.dout(fifo1s_dout), .rd_en(fifo1_rd_en), .rd_data_count(fifo1s_rd_data_count) );
+
+	assign Sm_AXI_WREADY = ((SAME_CLOCK_MODE ? 1'b0 : fifo1_wr_rst_busy) || (SAME_CLOCK_MODE ? fifo1s_full : fifo1_full)) ? 1'b0 : 1'b1;
 	assign fifo1_wr_en = (Sm_AXI_WVALID && Sm_AXI_WREADY) ? 1'b1 : 1'b0;
 
 	/* Return a response to the master */
@@ -203,13 +222,27 @@ module HYPERRAM_AXI4 #(
 	wire[1:0] fifo2_din, fifo2_dout;
 
 	FIFO_WRITE_RESP fifo2(
-		.rst(~AXI_ARESETN),
-		.rd_clk(AXI_ACLK), .dout(fifo2_dout), .rd_en(fifo2_rd_en), .empty(fifo2_empty),
-		.wr_clk(IOCLK_0), .din(fifo2_din), .wr_en(fifo2_wr_en) );
+		.rst(~AXI_ARESETN | SAME_CLOCK_MODE),
+		.rd_clk(AXI_ACLK & ~SAME_CLOCK_MODE), .dout(fifo2_dout), .rd_en(fifo2_rd_en), .empty(fifo2_empty),
+		.wr_clk(IOCLK_0  & ~SAME_CLOCK_MODE), .din(fifo2_din), .wr_en(fifo2_wr_en) );
+
+	// fifo2 emulation for SAME_CLOCK_MODE
+	reg[1:0] fifo2s_data;
+	reg fifo2s_empty;
+
+	always @(posedge AXI_ACLK) begin
+		if(!AXI_ARESETN)
+			fifo2s_empty <= 1'b1;
+		else if(fifo2_wr_en) begin
+			fifo2s_data <= fifo2_din;
+			fifo2s_empty <= 1'b0;
+		end else if(fifo2_rd_en)
+			fifo2s_empty <= 1'b1;
+	end
 
 	assign Sm_AXI_BID = awid;
-	assign Sm_AXI_BRESP = fifo2_dout;
-	assign Sm_AXI_BVALID = ~fifo2_empty;
+	assign Sm_AXI_BRESP = SAME_CLOCK_MODE ? fifo2s_data : fifo2_dout;
+	assign Sm_AXI_BVALID = SAME_CLOCK_MODE ? ~fifo2s_empty : ~fifo2_empty;
 	assign fifo2_rd_en = (Sm_AXI_BVALID && Sm_AXI_BREADY) ? 1'b1 : 1'b0;
 
 	always_ff @(posedge AXI_ACLK) begin
@@ -217,7 +250,7 @@ module HYPERRAM_AXI4 #(
 			write_channel_pending <= 1'b0;
 		else if(Sm_AXI_AWREADY && Sm_AXI_AWVALID)
 			write_channel_pending <= 1'b1;
-		else if(write_channel_pending && !fifo2_empty)
+		else if(write_channel_pending && !(SAME_CLOCK_MODE ? fifo2s_empty : fifo2_empty))
 			write_channel_pending <= 1'b0;
 	end
 
@@ -234,11 +267,25 @@ module HYPERRAM_AXI4 #(
 	reg[7:0] read_len_count;
 
 	FIFO_READ_WRITE_ADDR fifo3(
-		.rst(~AXI_ARESETN),
-		.wr_clk(AXI_ACLK), .din({ Sm_AXI_ARBURST, Sm_AXI_ARADDR, Sm_AXI_ARLEN }), .wr_en(fifo3_wr_en), .wr_rst_busy(fifo3_wr_rst_busy),
-		.rd_clk(IOCLK_0), .dout(fifo3_dout), .rd_en(fifo3_rd_en), .empty(fifo3_empty) );
+		.rst(~AXI_ARESETN | SAME_CLOCK_MODE),
+		.wr_clk(AXI_ACLK & ~SAME_CLOCK_MODE), .din({ Sm_AXI_ARBURST, Sm_AXI_ARADDR, Sm_AXI_ARLEN }), .wr_en(fifo3_wr_en), .wr_rst_busy(fifo3_wr_rst_busy),
+		.rd_clk(IOCLK_0  & ~SAME_CLOCK_MODE), .dout(fifo3_dout), .rd_en(fifo3_rd_en), .empty(fifo3_empty) );
 
-	assign Sm_AXI_ARREADY = (fifo3_wr_rst_busy || read_channel_pending) ? 1'b0 : 1'b1;
+	// fifo3 emulation for SAME_CLOCK_MODE
+	reg[41:0] fifo3s_data;
+	reg fifo3s_empty;
+
+	always @(posedge AXI_ACLK) begin
+		if(!AXI_ARESETN)
+			fifo3s_empty <= 1'b1;
+		else if(fifo3_wr_en) begin
+			fifo3s_data <= { Sm_AXI_ARBURST, Sm_AXI_ARADDR, Sm_AXI_ARLEN };
+			fifo3s_empty <= 1'b0;
+		end else if(fifo3_rd_en)
+			fifo3s_empty <= 1'b1;
+	end
+
+	assign Sm_AXI_ARREADY = ((SAME_CLOCK_MODE ? 1'b0 : fifo3_wr_rst_busy) || read_channel_pending) ? 1'b0 : 1'b1;
 	assign arerror = ( Sm_AXI_ARVALID && ((Sm_AXI_ARSIZE != AxSIZE_32BIT) || ((Sm_AXI_ARLEN != 8'd00) && (Sm_AXI_ARBURST != AxBURST_INCR) && (Sm_AXI_ARBURST != AxBURST_WRAP))) ) ? 1'b1 : 1'b0;	// Only 32-bit, INCR access is supported
 	assign fifo3_wr_en = (Sm_AXI_ARVALID && Sm_AXI_ARREADY && !arerror) ? 1'b1 : 1'b0;
 
@@ -246,18 +293,26 @@ module HYPERRAM_AXI4 #(
 		if(Sm_AXI_ARVALID && Sm_AXI_ARREADY)
 			arid <= Sm_AXI_ARID;
 
-	wire fifo4_wr_en, fifo4_rd_en, fifo4_empty;
+	wire fifo4_wr_en, fifo4_rd_en, fifo4_empty, fifo4s_empty;
 	wire[15:0] fifo4_din;
+	wire[31:0] fifo4_dout, fifo4s_dout;
 
 	FIFO_READ_DATA fifo4(
-		.rst(~AXI_ARESETN),
-		.rd_clk(AXI_ACLK), .dout({ Sm_AXI_RDATA[15:0], Sm_AXI_RDATA[31:16] }), .rd_en(fifo4_rd_en), .empty(fifo4_empty),
-		.wr_clk(IOCLK_0), .din(fifo4_din), .wr_en(fifo4_wr_en) );
+		.rst(~AXI_ARESETN | SAME_CLOCK_MODE),
+		.rd_clk(AXI_ACLK & ~SAME_CLOCK_MODE), .dout(fifo4_dout), .rd_en(fifo4_rd_en), .empty(fifo4_empty),
+		.wr_clk(IOCLK_0  & ~SAME_CLOCK_MODE), .din(fifo4_din), .wr_en(fifo4_wr_en) );
+
+	FIFO_READ_DATA_SYNC fifo4s(	// Sync'd common clock version of FIFO
+		.srst(~AXI_ARESETN | ~SAME_CLOCK_MODE), .clk(AXI_ACLK & SAME_CLOCK_MODE),
+		.dout(fifo4s_dout), .rd_en(fifo4_rd_en), .empty(fifo4s_empty),
+		.din(fifo4_din), .wr_en(fifo4_wr_en) );
 
 	assign Sm_AXI_RID = arid;
 	assign Sm_AXI_RRESP = ABRESP_OK;
-	assign Sm_AXI_RVALID = ~fifo4_empty;
+	assign Sm_AXI_RVALID = SAME_CLOCK_MODE ? ~fifo4s_empty : ~fifo4_empty;
 	assign fifo4_rd_en = (Sm_AXI_RVALID && Sm_AXI_RREADY) ? 1'b1 : 1'b0;
+	assign Sm_AXI_RDATA[15:0]  = SAME_CLOCK_MODE ? fifo4s_dout[31:16] : fifo4_dout[31:16];
+	assign Sm_AXI_RDATA[31:16] = SAME_CLOCK_MODE ? fifo4s_dout[15:0]  : fifo4_dout[15:0];
 
 	always_ff @(posedge AXI_ACLK) begin
 		if(!AXI_ARESETN)
@@ -310,17 +365,17 @@ module HYPERRAM_AXI4 #(
 				state_hram <= HRAM_IDLE;
 
 		HRAM_IDLE:
-			if(~fifo0_empty) begin
+			if(SAME_CLOCK_MODE ? ~fifo0s_empty : ~fifo0_empty) begin
 				// Wait for write data, then we'll start a write transaction
-				burst_len  <= { fifo0_dout[7:0], 1'b1 };
-				addr       <= fifo0_dout[39:8];
-				burst_type <= fifo0_dout[41:40];
+				burst_len  <= SAME_CLOCK_MODE ? { fifo0s_data[7:0], 1'b1 } : { fifo0_dout[7:0], 1'b1 };
+				addr       <= SAME_CLOCK_MODE ? fifo0s_data[39:8]  : fifo0_dout[39:8];
+				burst_type <= SAME_CLOCK_MODE ? fifo0s_data[41:40] : fifo0_dout[41:40];
 				state_hram <= HRAM_WAIT_WRITE_DATA;
-			end else if(~fifo3_empty) begin
+			end else if(SAME_CLOCK_MODE ? ~fifo3s_empty : ~fifo3_empty) begin
 				// Start a read transaction immediately
-				burst_len  <= { fifo3_dout[7:0], 1'b1 };
-				addr       <= fifo3_dout[39:8];
-				burst_type <= fifo3_dout[41:40];
+				burst_len  <= SAME_CLOCK_MODE ? { fifo3s_data[7:0], 1'b1 } : { fifo3_dout[7:0], 1'b1 };
+				addr       <= SAME_CLOCK_MODE ? fifo3s_data[39:8]  : fifo3_dout[39:8];
+				burst_type <= SAME_CLOCK_MODE ? fifo3s_data[41:40] : fifo3_dout[41:40];
 				read_start <= 1'b1;
 				state_hram <= HRAM_WAIT_COMPLETE;
 			end
@@ -339,9 +394,11 @@ module HYPERRAM_AXI4 #(
 		endcase
 	end
 
-	assign write_data_ready = (fifo1_rd_data_count == ({ 1'b0, burst_len } + 'd1)) ? 1'b1 : 1'b0;
+	assign write_data_ready =
+		SAME_CLOCK_MODE ? ((fifo1s_rd_data_count == ({ 1'b0, burst_len } + 'd1)) ? 1'b1 : 1'b0) :
+		                  ((fifo1_rd_data_count  == ({ 1'b0, burst_len } + 'd1)) ? 1'b1 : 1'b0);
 
-	assign fifo0_rd_en = ((state_hram == HRAM_IDLE) && ~fifo0_empty) ? 1'b1 : 1'b0;
+	assign fifo0_rd_en  = ((state_hram == HRAM_IDLE) && (SAME_CLOCK_MODE ? ~fifo0s_empty : ~fifo0_empty)) ? 1'b1 : 1'b0;
 	assign fifo3_rd_en = read_start ? 1'b1 : 1'b0;
 
 	assign fifo2_wr_en = ((state_hram == HRAM_WAIT_WRITE_DATA) && write_data_ready) ? 1'b1 : 1'b0;
@@ -371,8 +428,10 @@ module HYPERRAM_AXI4 #(
 		.REGISTER_DATA_IN(hram0_register_data_in),
 		.START(hram0_start), .BUSY(hram0_busy), .DONE(),
 
-		.WRITE_DATA_1ST(fifo1_dout[7:0]), .WRITE_DATA_2ND(fifo1_dout[15:8]),			// Little Endian
-		.WRITE_DATA_MASK_1ST(~fifo1_dout[16]), .WRITE_DATA_MASK_2ND(~fifo1_dout[17]),	// Little Endian
+		.WRITE_DATA_1ST(SAME_CLOCK_MODE ? fifo1s_dout[7:0]  : fifo1_dout[7:0]),
+		.WRITE_DATA_2ND(SAME_CLOCK_MODE ? fifo1s_dout[15:8] : fifo1_dout[15:8]),	// Little Endian
+		.WRITE_DATA_MASK_1ST(SAME_CLOCK_MODE ? ~fifo1s_dout[16] : ~fifo1_dout[16]),
+		.WRITE_DATA_MASK_2ND(SAME_CLOCK_MODE ? ~fifo1s_dout[17] : ~fifo1_dout[17]),	// Little Endian
 		.WRITE_DATA_REQ(fifo1_rd_en),
 
 		.READ_DATA_1ST(fifo4_din[7:0]), .READ_DATA_2ND(fifo4_din[15:8]),				// Little Endian

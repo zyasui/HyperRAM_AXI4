@@ -33,15 +33,15 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 <Abstract>
 This IP is an AXI4-HyperRAM(TM) controller for Xilinx 7-Series FPGAs.
 This IP has been tested with Cypress/Infineon S27KL0641 and Microblaze
-w/data-cache.
+with a data/instruction cache memory.
 
 
 
 <AXI4 Interfaces>
 Sm_AXI is an AXI4 slave port with INC/WRAP burst support to access the
-HyperRAM device..
+HyperRAM device memory space.
 
-Sr_AXI is an AXI4-Lite slave port to control input delay taps for RQS[7:0]
+Sr_AXI is an AXI4-Lite slave port to control input delay taps for DQ[7:0]
 and RWDS signals.
 
 Sr_AXI space register definition:
@@ -60,24 +60,51 @@ Sr_AXI space register definition:
 
 
 <Using this IP with cache memory>
-If your system has a cache memory, you will need to change the "Wrap Burst Len"
-parameter of this IP to match the same byte length as the cache line length.
+If your system has a cache memory, you will need to change the "Wrap Burst
+Length" parameter of this IP to match the same byte length as the cache line
+length.
+
+
+
+<Clock input ports>
+This IP has four clock input ports.
+  REFCLK200M:
+    This clock input port shall be fed a 200MHz fixed frequency clock for
+    the internal IDELAYCTRL module.
+
+  AXI_ACLK:
+    This clock is used as the AXI4 bus clock.
+
+  IOCLK_0:
+    This clock is used for the HyperRAM bus clock (CK and CK_N outputs).
+    The frequency of CK and CK_N outputs are same to IOCLK_0/IOCLK_90 inputs.
+    When IOCLK_0 and AXI_ACLK are exact same signal (same frequency, same
+    phase), the "SAME_CLOCK_MODE" IP core option can be set to 1. In this
+    case, the internal clock synchronization logic is omitted to minimize
+    internal latency.
+
+  IOCLK_90:
+    90 degree lag version of IOCLK_0.
 
 
 
 <TODO>
  * This IP doesn't support additional latency requests where the device
    temporarily stops RSDS transitions. This limitation should be no problem
-   for the S27KL0641 device, but that may cause a problem in other devices.
+   for the S27KL0641 device, but it may cause a problem in other devices.
 
- * This IP supports INCR and WRAP AXI4 burst access types, but FIXED burst
-   type is not supported.
+ * This IP supports the INCR and WRAP of AXI4 burst types, but the FIXED
+   type of burst is not supported. As per the AXI4 specification, if a
+   transaction with unsupported burst type is issued by a master, a SLVERR
+   response on BRESP (for a write transaction) or ARESP (for a read
+   transaction) should be returned to the master, but this IP core doesn't
+   return any response.
 
 
 
 <Calibration>
 This IP requires a delay tap calibration process for DQ[7:0] and RWDS lines
-before using. An example calibration code is shown below.
+at the system start-up. A calibration code example is shown below.
 
 ------
 #include <stdint.h>

@@ -40,7 +40,7 @@ module HYPERRAM_RAW #(
 	// Clock and reset
 	input wire REFCLK200M,		// 200MHz IDELAYCTRL reference clock
 	input wire IOCLK_0,			// Fundamental clock
-	input wire IOCLK_90,		// 90deg rag clock against IOCLK_0
+	input wire IOCLK_90,		// 90deg lag clock against IOCLK_0
 	input wire SCLR,			// Synchronous reset
 
 	// Input delay (IDELAY) control
@@ -144,8 +144,6 @@ module HYPERRAM_RAW #(
 		end
 	endgenerate
 
-	wire idlyctl0_rdy;
-
 	ODDR #(.DDR_CLK_EDGE("SAME_EDGE"), .SRTYPE("ASYNC")) oddr_ck_p(
 		.C(IOCLK_90), .CE(1'b1), .R(1'b0), .S(1'b0),
 		.D1(cke), .D2(1'b0), .Q(RPC_CK));
@@ -175,7 +173,7 @@ module HYPERRAM_RAW #(
 	IOBUF #(.DRIVE(6), .SLEW("SLOW"), .IOSTANDARD("LVCMOS18")) iobuf_rwds(
 		.I(iobuf_rwds_I), .O(iobuf_rwds_O), .T(iobuf_rwds_T), .IO(RPC_RWDS));
 
-	IDELAYCTRL idlyctl0(.RST(SCLR), .REFCLK(REFCLK200M), .RDY(idlyctl0_rdy));
+	IDELAYCTRL idlyctl0(.RST(SCLR), .REFCLK(REFCLK200M));
 
 
 

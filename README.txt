@@ -38,10 +38,10 @@ with a data/instruction cache memory.
 
 
 <AXI4 Interfaces>
-Sm_AXI is an AXI4 slave port with INC/WRAP burst support to access the
+Sm_AXI is the AXI4 slave port with INC/WRAP burst support to access the
 HyperRAM device memory space.
 
-Sr_AXI is an AXI4-Lite slave port to control input delay taps for DQ[7:0]
+Sr_AXI is the AXI4-Lite slave port to control input delay taps for DQ[7:0]
 and RWDS signals.
 
 Sr_AXI space register definition:
@@ -50,7 +50,7 @@ Sr_AXI space register definition:
            This bit is automatically cleared, so the software doesn't need to
            write zero to this bit.
 
-    Bit 0: Write 1 to increment each delay tap value. If the delay tap value
+    Bit 0: Write 1 to increase each delay tap value. If the delay tap value
            before incrementing is 31, the next value is undefined.
            This bit is automatically cleared, so the software doesn't need to
            write zero to this bit.
@@ -62,7 +62,7 @@ Sr_AXI space register definition:
 <Using this IP with cache memory>
 If your system has a cache memory, you will need to change the "Wrap Burst
 Length" parameter of this IP to match the same byte length as the cache line
-length.
+length of your system.
 
 
 
